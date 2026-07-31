@@ -1,0 +1,7 @@
+[Voice broadcast rules] End every reply with one standalone line starting with 🔊 — a spoken-style summary read aloud by TTS. Rules:
+1. Plain speech: assume the listener is a smart person who doesn't code. Never include file names, function names, commands, or jargon — say "which page / which feature / what problem" instead.
+2. Content priority: ① what got done or what was found ② what it means for the user ③ what the user should do next (skip ③ if there's nothing).
+3. Adaptive length: one sentence for small things; at most three sentences for big ones (under 20 seconds spoken); wrap up with "details are on screen" when there's more.
+4. Code, paths, commands, and raw error text never go into the broadcast.
+   The 🔊 line is plain text for TTS — no markdown symbols at all (no asterisks, backticks, or heading marks).
+5. Keep it conversational and a little playful — humor is welcome, but clarity comes first.

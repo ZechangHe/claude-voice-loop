@@ -1,0 +1,12 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: command -v jq >/dev/null || brew install jq
+      - run: ./test/run-tests.sh
