@@ -103,6 +103,8 @@ fi
 if [ "$WITH_FN_HUSH" -eq 1 ]; then
   command -v swiftc >/dev/null 2>&1 || { echo "❌ swiftc required for fn-hush:  xcode-select --install"; exit 1; }
   mkdir -p "$HOOKS_DIR/bin" "$HOME/.claude/debug" "$HOME/Library/LaunchAgents"
+  FN_REBUILD=0
+  [ -f "$HOOKS_DIR/bin/fn-hush" ] && FN_REBUILD=1
   swiftc -O -o "$HOOKS_DIR/bin/fn-hush" "$REPO_DIR/fn-hush/fn-hush.swift"
   PLIST="$HOME/Library/LaunchAgents/com.zcclabs.fn-hush.plist"
   cat > "$PLIST" <<EOF
@@ -129,9 +131,19 @@ if [ "$WITH_FN_HUSH" -eq 1 ]; then
 EOF
   launchctl unload "$PLIST" 2>/dev/null || true
   launchctl load "$PLIST"
-  echo "✓ fn-hush installed + loaded (press Fn to cut off the current sentence)"
-  echo "  If macOS asks for Input Monitoring permission: grant it, then run"
-  echo "  launchctl kickstart -k gui/$(id -u)/com.zcclabs.fn-hush"
+  echo "✓ fn-hush installed + loaded (press Fn to cut the current sentence; hold Fn to hold new broadcasts until release)"
+  if [ "$FN_REBUILD" -eq 1 ]; then
+    echo "  ⚠️  fn-hush was RECOMPILED — macOS ties the Input Monitoring grant to the binary's"
+    echo "      code signature, so the old grant is now silently void: the listener still starts"
+    echo "      and logs normally but receives no key events. To re-grant:"
+    echo "      System Settings → Privacy & Security → Input Monitoring → remove fn-hush with −"
+    echo "      (toggling it off/on is NOT enough), then run"
+    echo "        launchctl kickstart -k gui/$(id -u)/com.zcclabs.fn-hush"
+    echo "      re-enable the fn-hush row it re-creates, and kickstart once more."
+  else
+    echo "  If macOS asks for Input Monitoring permission: grant it, then run"
+    echo "  launchctl kickstart -k gui/$(id -u)/com.zcclabs.fn-hush"
+  fi
 fi
 
 echo ""

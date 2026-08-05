@@ -12,7 +12,7 @@ Claude Code ships voice *input* (`/voice`) but has no voice *output* — the fea
 - **`fcv`** — full read-aloud mode. The entire reply is spoken; code blocks, inline code, tables, and markdown are stripped before they reach the voice.
 - **Multi-session arbitration** — run several Claude Code sessions at once: audio queues instead of overlapping, a session announces itself ("mobile here:") when it isn't the one you were just typing in, and an *ack gate* keeps broadcasts from machine-gunning back-to-back — the next session's broadcast waits for your Enter (up to 45 s).
 - **Questions read aloud** — when Claude asks a multiple-choice question, the question and options are spoken too.
-- **`mute`** — toggle silence (also cuts off anything currently playing). **Fn key** — optional global listener that cuts off the current sentence without muting.
+- **`mute`** — toggle silence (also cuts off anything currently playing). **Fn key** — optional global listener: press to cut off the current sentence without muting; keep it held (push-to-talk) and new broadcasts wait until you release.
 - **edge-tts** neural voice (free, no API key) with automatic fallback to macOS `say`.
 
 ## True voice-conversation development
@@ -21,7 +21,7 @@ This repo is the *output* half. Pair it with **voice input** and you can genuine
 
 > hold a push-to-talk key → speak your instruction → it lands in the terminal as text → Claude works → the result is spoken back to you.
 
-We recommend [**BufferMind**](https://buffermind.com) (macOS, built by us) for the input half: its Voice Typing dictates into any focused app — terminal included — via **Fn push-to-talk**, with strong Chinese + English recognition. As a bonus, the same Fn press automatically cuts off any in-flight broadcast (see `fn-hush`), so grabbing the mic never fights the speaker. Any dictation tool that types into the terminal works too.
+We recommend [**BufferMind**](https://buffermind.com) (macOS, built by us) for the input half: its Voice Typing dictates into any focused app — terminal included — via **Fn push-to-talk**, with strong Chinese + English recognition. As a bonus, the same Fn press automatically cuts off any in-flight broadcast, and while you keep Fn held the loop stays quiet — new broadcasts wait until you release (see `fn-hush`), so grabbing the mic never fights the speaker. Any dictation tool that types into the terminal works too.
 
 ## Install
 
@@ -34,6 +34,8 @@ cd claude-voice-loop
 ```
 
 Requirements: **macOS** (playback uses `afplay`/`say`), **jq**, Claude Code. Recommended: `pipx install edge-tts` for the neural voice. The installer is idempotent — re-run it any time to update; it backs up files it replaces and never duplicates hook registrations or aliases.
+
+> ⚠️ **Recompiling fn-hush?** macOS ties the Input Monitoring grant to the binary's code signature, so after any rebuild the old grant silently stops delivering events — the listener still starts and logs normally, it just hears nothing. Fix: System Settings → Privacy & Security → Input Monitoring → remove `fn-hush` with **−** (toggling it off/on is not enough), run `launchctl kickstart -k gui/$UID/com.zcclabs.fn-hush`, re-enable the row it re-creates, then kickstart once more.
 
 Then open a **new terminal**:
 
@@ -59,6 +61,7 @@ reply ends ── Stop hook ──▶ tts-stop.sh ──▶ 🔊 line (cv) / cle
 you press Enter ── UserPromptSubmit ──▶ tts-ack.sh    releases the ack gate
 Claude asks a question ── PreToolUse ──▶ tts-ask.sh   reads question + options
 you press Fn ──▶ fn-hush (CGEventTap) ──▶ hush.sh     cuts off the current sentence
+you hold Fn ──▶ heartbeat flag ──▶ speak.sh           holds new broadcasts until release
 ```
 
 Design notes for the curious:
@@ -68,6 +71,7 @@ Design notes for the curious:
 - **Same-session interruption** — a new reply kills its own previous playback (whole process group), so a fast follow-up never queues behind itself.
 - **Sentence-boundary fallback** — in `cv` mode, replies without a 🔊 line get truncated at the last full sentence within 200 chars plus "details are on screen" — never mid-sentence.
 - **One markdown choke point** — all four callers pass through the same stripper in `speak.sh`, so TTS never says "asterisk asterisk".
+- **Heartbeat flag, not a mute** — while Fn is held, fn-hush refreshes a flag file every second and `speak.sh` waits before starting playback; a flag older than 3 s means the listener died mid-hold and is ignored — a crashed listener can never leave the loop permanently silent.
 
 ## Configuration
 

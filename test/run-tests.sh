@@ -2,6 +2,7 @@
 # claude-voice-loop test suite — silent (no audio); safe to run anywhere.
 #  1. bash -n syntax check on every script
 #  2. tts-stop.sh --dry-run behavior (cv summary line / fallback truncation / fcv full mode)
+#  2.5 speak.sh Fn gate — hold/stale/release, stubbed engines, silent (macOS only)
 #  3. install.sh + uninstall.sh end-to-end against a throwaway $HOME (macOS + jq only)
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -60,6 +61,38 @@ if printf '%s' "$O4" | grep -q "|"; then bad "fcv: table pipes leaked into speec
 P5=$(jq -n --arg t $'正文在此。\n🔊 口语摘要一句。' '{last_assistant_message:$t, session_id:"s1"}')
 O5=$(printf '%s' "$P5" | CC_VOICE_FULL=1 "$HOOK" --dry-run)
 check "fcv: stray 🔊 keeps content, drops prefix" "正文在此。 口语摘要一句。" "$O5"
+
+# ── 2.5 speak.sh Fn gate (macOS only: BSD stat; engines stubbed, no audio) ──
+if [ "$(uname)" = "Darwin" ]; then
+  T2="$(mktemp -d)"
+  mkdir -p "$T2/bin" "$T2/tmp/cc-voice"
+  printf '#!/bin/bash\nexit 1\n' > "$T2/bin/edge-tts"   # force the say fallback
+  printf '#!/bin/bash\necho spoken >> "%s/spoken.log"\n' "$T2" > "$T2/bin/say"
+  chmod +x "$T2/bin/edge-tts" "$T2/bin/say"
+  FN="$T2/tmp/cc-voice/fn-down"
+
+  # stale flag (no heartbeat for >3 s = listener died mid-hold) is ignored
+  touch -t 202601010000 "$FN"
+  env PATH="$T2/bin:$PATH" TMPDIR="$T2/tmp" "$ROOT/hooks/speak.sh" --channel t1 "stale flag test"
+  g1=0
+  for _ in $(seq 1 40); do [ -f "$T2/spoken.log" ] && { g1=1; break; }; sleep 0.25; done
+  [ "$g1" = 1 ] && ok "fn gate: stale flag ignored, playback proceeds" || bad "fn gate: stale flag blocked playback"
+  # t1's playback wrote the ack gate — clear it so test 2 exercises the FN gate, not the ack gate
+  rm -f "$FN" "$T2/spoken.log" "$T2/tmp/cc-voice/await-ack"
+
+  # fresh flag holds playback; removing it (= fn released) lets it play
+  touch "$FN"
+  env PATH="$T2/bin:$PATH" TMPDIR="$T2/tmp" "$ROOT/hooks/speak.sh" --channel t2 "fresh flag test"
+  sleep 1.5
+  [ ! -f "$T2/spoken.log" ] && ok "fn gate: fresh flag holds playback" || bad "fn gate: played while flag fresh"
+  rm -f "$FN"
+  g2=0
+  for _ in $(seq 1 40); do [ -f "$T2/spoken.log" ] && { g2=1; break; }; sleep 0.25; done
+  [ "$g2" = 1 ] && ok "fn gate: releasing the flag releases playback" || bad "fn gate: never played after release"
+  rm -rf "$T2"
+else
+  echo "SKIP: speak.sh fn-gate (needs macOS)"
+fi
 
 # ── 3. install / uninstall e2e (throwaway HOME) ─────────────────────────────
 if [ "$(uname)" = "Darwin" ] && command -v jq >/dev/null 2>&1; then

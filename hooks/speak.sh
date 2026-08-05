@@ -5,6 +5,8 @@
 # 应答闸：开播那刻落闸 await-ack（播放中的回车也算消化——原来播完才落，回话快了回车被吞），
 # 下一条（别的 channel）要等用户回车（tts-ack.sh / UserPromptSubmit 清闸）才开播；
 # 兜底 CC_TTS_ACK_TIMEOUT 秒（默认 45）强制放行——闸的本意是防背靠背连播，不是每条欠一次回车。
+# Fn 闸：用户摁着 Fn 说话时不开播（fn-hush 摁下落旗标、每秒心跳、松开清），
+# 松开 Fn 才放行；心跳断了（fn-hush 没在跑/已崩）按过期忽略，不会哑掉。
 # 身份前缀：开播那刻才定（生成时定会串台——播报可能被闸憋着迟到）：
 # 用户最近打字的会话 ≠ 本条、或上一条开播的 ≠ 本条 → 先念「<lane> 这边：」报家门。
 # 环境旋钮：CC_VOICE_NAME=edge-tts 嗓音；CC_TTS_LANE_TEMPLATE=报家门句式（printf 模板，
@@ -105,6 +107,19 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
     [ -f "$HOOK_DIR/tts-off" ] && break
     g=$((g+1))
     [ "$g" -gt "$MAXG" ] && break
+    sleep 0.3
+  done
+
+  # Fn 闸：旗标在且 3 秒内有心跳 = 用户正摁着 Fn 说话，憋住；过期视为残留，照播。
+  # 旗标路径按 hush.sh 同款兜底——fn-hush 跑在 launchd 下，TMPDIR 可能未设。
+  FN_FLAG="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || echo /tmp)}/cc-voice/fn-down"
+  f=0
+  while [ -f "$FN_FLAG" ]; do
+    AGE=$(( $(date +%s) - $(stat -f %m "$FN_FLAG" 2>/dev/null || echo 0) ))
+    [ "$AGE" -gt 3 ] && break
+    [ -f "$HOOK_DIR/tts-off" ] && break
+    f=$((f+1))
+    [ "$f" -gt 6000 ] && break
     sleep 0.3
   done
 
