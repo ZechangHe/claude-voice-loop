@@ -5,6 +5,8 @@
 # 应答闸：开播那刻落闸 await-ack（播放中的回车也算消化——原来播完才落，回话快了回车被吞），
 # 下一条（别的 channel）要等用户回车（tts-ack.sh / UserPromptSubmit 清闸）才开播；
 # 兜底 CC_TTS_ACK_TIMEOUT 秒（默认 45）强制放行——闸的本意是防背靠背连播，不是每条欠一次回车。
+# 多 agent 车道模式（mcv，CC_VOICE_MULTI=1）整体绕开应答闸：既不等闸也不落闸
+# （落了会把别的 cv 会话憋住），一条播完下一条立刻接上，中间只留 0.35s 换气。
 # Fn 闸：用户摁着 Fn 说话时不开播（fn-hush 摁下落旗标、每秒心跳、松开清），
 # 松开 Fn 才放行；心跳断了（fn-hush 没在跑/已崩）按过期忽略，不会哑掉。
 # 身份前缀：开播那刻才定（生成时定会串台——播报可能被闸憋着迟到）：
@@ -39,6 +41,7 @@ SAFE_CH="$(printf '%s' "$CHANNEL" | tr -c 'a-zA-Z0-9_-' '_')"
 PIDFILE="$CACHE_DIR/play-$SAFE_CH.pid"
 LOCK="$CACHE_DIR/lock"
 GATE="$CACHE_DIR/await-ack"
+MULTI="${CC_VOICE_MULTI:-0}"
 VOICE="${CC_VOICE_NAME:-zh-CN-YunjianNeural}"
 LANE_TMPL="${CC_TTS_LANE_TEMPLATE:-%s 这边：}"
 MP3="$CACHE_DIR/say-$SAFE_CH-$$.mp3"
@@ -101,14 +104,17 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
   # 应答闸：上一条播报还没被用户回车消化 → 憋住不播。
   # 同 channel 自己的后续播报不受闸（同一条 CLI 接着说，不用等确认，也防自锁死）。
   # tts-ack.sh（UserPromptSubmit）清闸放行；兜底超时后强制放行。
-  MAXG=$(( ${CC_TTS_ACK_TIMEOUT:-45} * 10 / 3 ))
-  g=0
-  while [ -f "$GATE" ] && [ "$(cat "$GATE" 2>/dev/null)" != "$CHANNEL" ]; do
-    [ -f "$HOOK_DIR/tts-off" ] && break
-    g=$((g+1))
-    [ "$g" -gt "$MAXG" ] && break
-    sleep 0.3
-  done
+  # mcv 多 agent 模式不进这道闸——那边要的就是一条播完立刻接下一条。
+  if [ "$MULTI" != "1" ]; then
+    MAXG=$(( ${CC_TTS_ACK_TIMEOUT:-45} * 10 / 3 ))
+    g=0
+    while [ -f "$GATE" ] && [ "$(cat "$GATE" 2>/dev/null)" != "$CHANNEL" ]; do
+      [ -f "$HOOK_DIR/tts-off" ] && break
+      g=$((g+1))
+      [ "$g" -gt "$MAXG" ] && break
+      sleep 0.3
+    done
+  fi
 
   # Fn 闸：旗标在且 3 秒内有心跳 = 用户正摁着 Fn 说话，憋住；过期视为残留，照播。
   # 旗标路径按 hush.sh 同款兜底——fn-hush 跑在 launchd 下，TMPDIR 可能未设。
@@ -135,8 +141,8 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
 
   # 排队期间可能被 mute 了，播前再查一次
   if [ ! -f "$HOOK_DIR/tts-off" ]; then
-    # 开播即落闸/记账：播放中的回车也能清闸放行下一条
-    printf '%s' "$CHANNEL" > "$GATE"
+    # 开播即落闸/记账：播放中的回车也能清闸放行下一条（mcv 不落闸，免得憋住别的会话）
+    [ "$MULTI" = "1" ] || printf '%s' "$CHANNEL" > "$GATE"
     printf '%s' "$CHANNEL" > "$CACHE_DIR/last-played"
     echo "$ENGINE" > "$CACHE_DIR/last-engine"
     if [ "$ENGINE" = "edge-tts" ]; then
@@ -147,6 +153,8 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
       [ "$SPEAK_PREFIX" -eq 1 ] && MSG="${PRE_TEXT}${TEXT}"
       say "$MSG"
     fi
+    # mcv 没有回车当节拍器，两条之间留半口气，别糊成一句
+    [ "$MULTI" = "1" ] && sleep 0.35
   fi
   rm -f "$MP3"
   [ "$OWNED" -eq 1 ] && rm -rf "$LOCK"

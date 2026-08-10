@@ -10,7 +10,8 @@ Claude Code ships voice *input* (`/voice`) but has no voice *output* — the fea
 
 - **`cv`** — conversational mode. A system prompt teaches the model to end every reply with one plain-speech 🔊 summary line (no jargon, no file names — written for a smart listener who doesn't code). The Stop hook reads exactly that line aloud.
 - **`fcv`** — full read-aloud mode. The entire reply is spoken; code blocks, inline code, tables, and markdown are stripped before they reach the voice.
-- **Multi-session arbitration** — run several Claude Code sessions at once: audio queues instead of overlapping, a session announces itself ("mobile here:") when it isn't the one you were just typing in, and an *ack gate* keeps broadcasts from machine-gunning back-to-back — the next session's broadcast waits for your Enter (up to 45 s).
+- **`mcv`** — multi-agent lane mode, for babysitting several parallel Claude Code lanes. No summaries at all: each lane just says **"macos-1 is done"** (its worktree name) when a reply ends, and the ack gate is off — as soon as one lane finishes speaking the next one starts, no Enter required. A lane that needs you can still say so by ending its reply with a short 🔊 line.
+- **Multi-session arbitration** — run several Claude Code sessions at once: audio queues instead of overlapping, a session announces itself ("mobile here:") when it isn't the one you were just typing in, and an *ack gate* keeps broadcasts from machine-gunning back-to-back — the next session's broadcast waits for your Enter (up to 45 s). In `mcv` the gate steps aside; the queue still serializes playback.
 - **Questions read aloud** — when Claude asks a multiple-choice question, the question and options are spoken too.
 - **`mute`** — toggle silence (also cuts off anything currently playing). **Fn key** — optional global listener: press to cut off the current sentence without muting; keep it held (push-to-talk) and new broadcasts wait until you release.
 - **edge-tts** neural voice (free, no API key) with automatic fallback to macOS `say`.
@@ -42,6 +43,7 @@ Then open a **new terminal**:
 ```bash
 cv     # spoken one-line summaries
 fcv    # full replies read aloud
+mcv    # parallel lanes: "<lane> is done", no ack gate
 mute   # toggle silence
 ```
 
@@ -53,6 +55,7 @@ mute   # toggle silence
 you speak (Fn push-to-talk dictation) ──────────▶ claude prompt
 
 reply ends ── Stop hook ──▶ tts-stop.sh ──▶ 🔊 line (cv) / cleaned full reply (fcv)
+                                            / "<lane> is done" (mcv)
                                               │
                                               ▼
                                        speak.sh ──▶ edge-tts mp3 ──▶ afplay
@@ -70,6 +73,7 @@ Design notes for the curious:
 - **Identity decided at play time** — whether to announce "mobile here:" is checked the moment audio starts, not when the text was generated; a broadcast held back by the ack gate would otherwise announce stale context.
 - **Same-session interruption** — a new reply kills its own previous playback (whole process group), so a fast follow-up never queues behind itself.
 - **Sentence-boundary fallback** — in `cv` mode, replies without a 🔊 line get truncated at the last full sentence within 200 chars plus "details are on screen" — never mid-sentence.
+- **Terse by construction, not by prompting** — `mcv`'s phrase is built by the hook from the lane name, so a chatty model can't make it long; the only text it controls is the optional one-line 🔊 escape hatch. Its broadcasts also never *arm* the ack gate, so an `mcv` lane can't hold up a `cv` session running alongside it.
 - **One markdown choke point** — all four callers pass through the same stripper in `speak.sh`, so TTS never says "asterisk asterisk".
 - **Heartbeat flag, not a mute** — while Fn is held, fn-hush refreshes a flag file every second and `speak.sh` waits before starting playback; a flag older than 3 s means the listener died mid-hold and is ignored — a crashed listener can never leave the loop permanently silent.
 
@@ -79,11 +83,15 @@ Design notes for the curious:
 |---|---|---|
 | `CC_VOICE_NAME` | `zh-CN-YunjianNeural` | Any edge-tts voice (`edge-tts --list-voices`) |
 | `CC_VOICE_FULL` | unset | `1` = full read-aloud (this is all `fcv` adds) |
+| `CC_VOICE_MULTI` | unset | `1` = multi-agent lane mode: fixed "<lane> is done" phrase, ack gate off (this is all `mcv` adds) |
 | `CC_TTS_ACK_TIMEOUT` | `45` | Seconds a queued broadcast waits for your Enter before playing anyway |
 | `CC_TTS_ASK_PHRASE` | `要选一下：` | Spoken lead-in for multiple-choice questions |
 | `CC_TTS_LANE_TEMPLATE` | `%s 这边：` | printf template for the session announcement (e.g. `"%s here: "`) |
+| `CC_TTS_DONE_TEMPLATE` | `%s 搞定了` | mcv: what a finished lane says (e.g. `"%s is done"`) |
+| `CC_TTS_NOTE_TEMPLATE` | `%s：%s` | mcv: lane + the 🔊 note, when a lane needs you (e.g. `"%s: %s"`) |
+| `CC_TTS_ASK_MULTI_TEMPLATE` | `%s 要你确认` | mcv: spoken instead of reading a whole question aloud |
 
-The broadcast style lives in `~/.claude/hooks/voice-prompt.txt` (cv) and `voice-prompt-full.txt` (fcv) — plain text appended to the system prompt; edit to taste.
+The broadcast style lives in `~/.claude/hooks/voice-prompt.txt` (cv), `voice-prompt-full.txt` (fcv), and `voice-prompt-multi.txt` (mcv) — plain text appended to the system prompt; edit to taste.
 
 ## Compatibility
 

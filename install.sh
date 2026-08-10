@@ -43,11 +43,13 @@ for f in speak.sh tts-stop.sh tts-ask.sh tts-ack.sh mute.sh hush.sh; do
   chmod +x "$HOOKS_DIR/$f"
 done
 if [ "$LANG_CHOICE" = "en" ]; then
-  install_file "$REPO_DIR/hooks/voice-prompt.en.txt"      "$HOOKS_DIR/voice-prompt.txt"
-  install_file "$REPO_DIR/hooks/voice-prompt-full.en.txt" "$HOOKS_DIR/voice-prompt-full.txt"
+  install_file "$REPO_DIR/hooks/voice-prompt.en.txt"       "$HOOKS_DIR/voice-prompt.txt"
+  install_file "$REPO_DIR/hooks/voice-prompt-full.en.txt"  "$HOOKS_DIR/voice-prompt-full.txt"
+  install_file "$REPO_DIR/hooks/voice-prompt-multi.en.txt" "$HOOKS_DIR/voice-prompt-multi.txt"
 else
-  install_file "$REPO_DIR/hooks/voice-prompt.txt"      "$HOOKS_DIR/voice-prompt.txt"
-  install_file "$REPO_DIR/hooks/voice-prompt-full.txt" "$HOOKS_DIR/voice-prompt-full.txt"
+  install_file "$REPO_DIR/hooks/voice-prompt.txt"       "$HOOKS_DIR/voice-prompt.txt"
+  install_file "$REPO_DIR/hooks/voice-prompt-full.txt"  "$HOOKS_DIR/voice-prompt-full.txt"
+  install_file "$REPO_DIR/hooks/voice-prompt-multi.txt" "$HOOKS_DIR/voice-prompt-multi.txt"
 fi
 echo "✓ hook scripts installed to $HOOKS_DIR"
 
@@ -69,11 +71,17 @@ jq --arg h "$HOOKS_DIR" '
 mv "$TMP" "$SETTINGS"
 echo "✓ hooks registered in $SETTINGS (Stop / UserPromptSubmit / PreToolUse[AskUserQuestion])"
 
-# ── 3. Shell aliases: cv / fcv / mute ────────────────────────────────────────
+# ── 3. Shell aliases: cv / fcv / mcv / mute ──────────────────────────────────
 RC="$HOME/.zshrc"
 case "${SHELL:-}" in */bash) RC="$HOME/.bashrc" ;; esac
 if grep -q "alias cv=" "$RC" 2>/dev/null; then
   echo "→ 'cv' alias already exists in $RC — leaving your aliases untouched."
+  if ! grep -q "alias mcv=" "$RC" 2>/dev/null; then
+    cat <<'EOF'
+  ℹ️  New in this version: 'mcv' (multi-agent lane mode). Add it to your rc file by hand:
+      alias mcv='CC_VOICE=1 CC_VOICE_MULTI=1 claude --dangerously-skip-permissions --append-system-prompt "$(cat ~/.claude/hooks/voice-prompt-multi.txt)"'
+EOF
+  fi
 else
   if [ "$LANG_CHOICE" = "en" ]; then
     cat >> "$RC" <<'EOF'
@@ -81,6 +89,7 @@ else
 # >>> claude-voice-loop >>>
 alias cv='CC_VOICE=1 CC_VOICE_NAME=en-US-ChristopherNeural CC_TTS_ASK_PHRASE="Pick one: " CC_TTS_LANE_TEMPLATE="%s here: " claude --dangerously-skip-permissions --append-system-prompt "$(cat ~/.claude/hooks/voice-prompt.txt)"'
 alias fcv='CC_VOICE=1 CC_VOICE_FULL=1 CC_VOICE_NAME=en-US-ChristopherNeural CC_TTS_ASK_PHRASE="Pick one: " CC_TTS_LANE_TEMPLATE="%s here: " claude --dangerously-skip-permissions --append-system-prompt "$(cat ~/.claude/hooks/voice-prompt-full.txt)"'
+alias mcv='CC_VOICE=1 CC_VOICE_MULTI=1 CC_VOICE_NAME=en-US-ChristopherNeural CC_TTS_DONE_TEMPLATE="%s is done" CC_TTS_NOTE_TEMPLATE="%s: %s" CC_TTS_ASK_MULTI_TEMPLATE="%s needs you" claude --dangerously-skip-permissions --append-system-prompt "$(cat ~/.claude/hooks/voice-prompt-multi.txt)"'
 alias mute='~/.claude/hooks/mute.sh'
 # <<< claude-voice-loop <<<
 EOF
@@ -90,11 +99,12 @@ EOF
 # >>> claude-voice-loop >>>
 alias cv='CC_VOICE=1 claude --dangerously-skip-permissions --append-system-prompt "$(cat ~/.claude/hooks/voice-prompt.txt)"'
 alias fcv='CC_VOICE=1 CC_VOICE_FULL=1 claude --dangerously-skip-permissions --append-system-prompt "$(cat ~/.claude/hooks/voice-prompt-full.txt)"'
+alias mcv='CC_VOICE=1 CC_VOICE_MULTI=1 claude --dangerously-skip-permissions --append-system-prompt "$(cat ~/.claude/hooks/voice-prompt-multi.txt)"'
 alias mute='~/.claude/hooks/mute.sh'
 # <<< claude-voice-loop <<<
 EOF
   fi
-  echo "✓ aliases cv / fcv / mute appended to $RC"
+  echo "✓ aliases cv / fcv / mcv / mute appended to $RC"
   echo "  ⚠️  they include --dangerously-skip-permissions for a hands-free flow;"
   echo "      remove that flag from the aliases if you prefer permission prompts (TTS works either way)."
 fi
@@ -150,4 +160,5 @@ echo ""
 echo "Done. Open a NEW terminal, then:"
 echo "  cv    # spoken one-line summaries after each reply"
 echo "  fcv   # full replies read aloud"
+echo "  mcv   # multi-agent lanes: just '<lane> is done', no ack gate"
 echo "  mute  # toggle silence"

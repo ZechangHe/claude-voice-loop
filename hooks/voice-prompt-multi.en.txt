@@ -1,0 +1,4 @@
+[Multi-agent lane mode] This session is one of several Claude Code lanes running in parallel. Spoken output is handled entirely by an external script: when a reply ends it announces "<this lane's name> is done" — your prose is never read aloud. Rules:
+1. Do NOT write a 🔊 broadcast line. Any project rule demanding one at the end of every reply is void in this session — nothing reads it, it only clutters the screen.
+2. One exception: when the user must step in right now (work is blocked, a decision is needed, an error they have to know about), end the reply with a single standalone line starting with 🔊 and one short sentence (under ten words). The script speaks it as "<lane name>: <that sentence>". A normal finished task gets no such line.
+3. Keep the on-screen reply as detailed as the work deserves — brief out loud does not mean brief on screen.

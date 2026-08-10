@@ -32,7 +32,8 @@ fi
 # 3. hook scripts + prompts + mute state
 rm -f "$HOOKS_DIR/speak.sh" "$HOOKS_DIR/tts-stop.sh" "$HOOKS_DIR/tts-ask.sh" \
       "$HOOKS_DIR/tts-ack.sh" "$HOOKS_DIR/mute.sh" "$HOOKS_DIR/hush.sh" \
-      "$HOOKS_DIR/voice-prompt.txt" "$HOOKS_DIR/voice-prompt-full.txt" "$HOOKS_DIR/tts-off"
+      "$HOOKS_DIR/voice-prompt.txt" "$HOOKS_DIR/voice-prompt-full.txt" \
+      "$HOOKS_DIR/voice-prompt-multi.txt" "$HOOKS_DIR/tts-off"
 echo "✓ hook scripts removed (any *.bak backups were left in place)"
 
 # 4. alias block (only if it carries our markers; hand-written aliases are left alone)

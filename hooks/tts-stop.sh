@@ -3,6 +3,9 @@
 # 提取回复里的「🔊 …」播报行；没有则剥掉代码/markdown 后念开头（≤200 字，
 # 在最后一个完整句处收尾 + 补「细节在屏幕上」，不念半截话）。
 # 全文模式（fcv，CC_VOICE_FULL=1）：不取 🔊 行，整篇回复剥码后完整朗读，不截断。
+# 多 agent 车道模式（mcv，CC_VOICE_MULTI=1）：不念正文，只报一句「<车道名> 搞定了」——
+#   几条 CLI 并行时耳朵只需要知道「谁干完了」；模型主动留了 🔊 行（卡住/要拍板）才改念
+#   「<车道名>：<那句>」。车道名已在正文里，所以不再让 speak.sh 报家门（--lane 传空）。
 # --dry-run：只打印将要念的文本，不发声（机器测试用，绕过 CC_VOICE 门）。
 set -u
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -31,7 +34,28 @@ TEXT="$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty')"
 SESSION="$(printf '%s' "$INPUT" | jq -r '.session_id // "global"')"
 CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty')"
 
-if [ "${CC_VOICE_FULL:-0}" = "1" ]; then
+# 车道名 = cwd 目录名（剥掉 feat+/fix+ 前缀）。多 agent 模式念它，其余模式交给
+# speak.sh 决定要不要报家门——念不念在开播那刻定，生成时定会串台（播报可能被闸憋着迟到）
+LANE=""
+[ -n "$CWD" ] && LANE="$(basename "$CWD" | sed -E 's/^[a-z]+\+//')"
+SPEAK_LANE="$LANE"
+
+if [ "${CC_VOICE_MULTI:-0}" = "1" ]; then
+  # mcv 多 agent 车道模式：固定短句，正文一律不念
+  NOTE="$(printf '%s\n' "$TEXT" | grep '^🔊' | sed 's/^🔊[[:space:]]*//' | tr '\n' ' ')"
+  if [ -n "${NOTE// /}" ]; then
+    # shellcheck disable=SC2059
+    if [ -n "$LANE" ]; then
+      SPOKEN="$(printf "${CC_TTS_NOTE_TEMPLATE:-%s：%s}" "$LANE" "$NOTE")"
+    else
+      SPOKEN="$NOTE"
+    fi
+  else
+    # shellcheck disable=SC2059
+    SPOKEN="$(printf "${CC_TTS_DONE_TEMPLATE:-%s 搞定了}" "$LANE")"
+  fi
+  SPEAK_LANE=""   # 车道名已经在正文里，别再报一次家门
+elif [ "${CC_VOICE_FULL:-0}" = "1" ]; then
   # fcv 全文模式：整篇剥码后全念，不截断；万一混进 🔊 行只剥前缀不丢内容
   SPOKEN="$(printf '%s\n' "$TEXT" | sed 's/^🔊[[:space:]]*//' | strip_md)"
 else
@@ -54,15 +78,10 @@ fi
 SPOKEN="$(printf '%s' "$SPOKEN" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
 [ -z "$SPOKEN" ] && exit 0
 
-# 多会话辨声：只算出车道名（cwd 目录名，剥掉 feat+/fix+ 前缀）传给 speak.sh；
-# 念不念「xx 这边：」由 speak.sh 开播那刻定——生成时定会串台（播报可能被闸憋着迟到）
-LANE=""
-[ -n "$CWD" ] && LANE="$(basename "$CWD" | sed -E 's/^[a-z]+\+//')"
-
 if [ "$DRY" -eq 1 ]; then
   printf '%s\n' "$SPOKEN"
   exit 0
 fi
 
-"$HOOK_DIR/speak.sh" --channel "$SESSION" --lane "$LANE" "$SPOKEN"
+"$HOOK_DIR/speak.sh" --channel "$SESSION" --lane "$SPEAK_LANE" "$SPOKEN"
 exit 0
