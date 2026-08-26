@@ -169,6 +169,111 @@ else
   echo "SKIP: speak.sh ack-gate (needs macOS)"
 fi
 
+# ── 2.7 播报队列：号在「干完活」那刻拿，播出顺序不跟着合成快慢走 ────────────
+# 三条 CLI 依次干完（lane1 → lane2 → lane3），但合成耗时故意反过来（lane1 最慢、
+# lane3 最快）。老的「先合成再抢锁」会念成 lane3 lane2 lane1；拿号排队必须是 1 2 3。
+if [ "$(uname)" = "Darwin" ]; then
+  T4="$(mktemp -d)"
+  mkdir -p "$T4/bin" "$T4/tmp/cc-voice"
+  cat > "$T4/bin/edge-tts" <<'STUB'
+#!/bin/bash
+case "$*" in
+  *lane1*) sleep 1.2 ;;
+  *lane2*) sleep 0.6 ;;
+  *)       sleep 0.05 ;;
+esac
+exit 1
+STUB
+  printf '#!/bin/bash\nsleep 0.2\necho "$*" >> "%s/spoken.log"\n' "$T4" > "$T4/bin/say"
+  chmod +x "$T4/bin/edge-tts" "$T4/bin/say"
+  for i in 1 2 3; do
+    env PATH="$T4/bin:$PATH" TMPDIR="$T4/tmp" CC_VOICE_MULTI=1 \
+      "$ROOT/hooks/speak.sh" --channel "q$i" --lane "" "lane$i"
+    sleep 0.15
+  done
+  for _ in $(seq 1 60); do
+    if [ -f "$T4/spoken.log" ] && [ "$(wc -l < "$T4/spoken.log")" -ge 3 ]; then break; fi
+    sleep 0.25
+  done
+  ORD="$(tr '\n' ' ' < "$T4/spoken.log" 2>/dev/null || true)"
+  check "queue: plays in finish order, not synthesis order" "^lane1 lane2 lane3 *$" "$ORD"
+  rm -rf "$T4"
+else
+  echo "SKIP: speak.sh queue order (needs macOS)"
+fi
+
+# ── 2.8 过期作废：你已经回复过的那条 CLI，排队里的播报不再开口 ────────────────
+if [ "$(uname)" = "Darwin" ] && command -v jq >/dev/null 2>&1; then
+  T5="$(mktemp -d)"
+  mkdir -p "$T5/bin" "$T5/tmp/cc-voice"
+  printf '#!/bin/bash\nexit 1\n' > "$T5/bin/edge-tts"
+  printf '#!/bin/bash\nsleep 0.6\necho "$*" >> "%s/spoken.log"\n' "$T5" > "$T5/bin/say"
+  chmod +x "$T5/bin/edge-tts" "$T5/bin/say"
+  for c in one two three; do
+    env PATH="$T5/bin:$PATH" TMPDIR="$T5/tmp" CC_VOICE_MULTI=1 \
+      "$ROOT/hooks/speak.sh" --channel "s-$c" --lane "" "$c"
+    sleep 0.1
+  done
+  # 「one」正在播，「two」「three」排在队里 —— 此刻你在 two 那条 CLI 上敲了回车
+  printf '{"session_id":"s-two"}' | env TMPDIR="$T5/tmp" "$ROOT/hooks/tts-ack.sh"
+  for _ in $(seq 1 40); do
+    printf '%s' "$(cat "$T5/spoken.log" 2>/dev/null || true)" | grep -q three && break
+    sleep 0.25
+  done
+  SPOKE="$(tr '\n' ' ' < "$T5/spoken.log" 2>/dev/null || true)"
+  check "stale drop: the un-replied lanes still speak" "^one three *$" "$SPOKE"
+  if printf '%s' "$SPOKE" | grep -qw two; then
+    bad "stale drop: replied-to lane spoke anyway — got: [$SPOKE]"
+  else
+    ok "stale drop: replied-to lane stays quiet"
+  fi
+  rm -rf "$T5"
+else
+  echo "SKIP: speak.sh stale-drop (needs macOS + jq)"
+fi
+
+# ── 2.9 合成看门狗：edge-tts 挂死不能拖住整个队列，超时降级 say ───────────────
+if [ "$(uname)" = "Darwin" ]; then
+  T6="$(mktemp -d)"
+  mkdir -p "$T6/bin" "$T6/tmp/cc-voice"
+  printf '#!/bin/bash\nsleep 30\n' > "$T6/bin/edge-tts"
+  printf '#!/bin/bash\necho "$*" >> "%s/spoken.log"\n' "$T6" > "$T6/bin/say"
+  chmod +x "$T6/bin/edge-tts" "$T6/bin/say"
+  env PATH="$T6/bin:$PATH" TMPDIR="$T6/tmp" CC_VOICE_MULTI=1 CC_TTS_SYNTH_TIMEOUT=1 \
+    "$ROOT/hooks/speak.sh" --channel w1 --lane "" "watchdog test"
+  w=0
+  for _ in $(seq 1 24); do [ -f "$T6/spoken.log" ] && { w=1; break; }; sleep 0.25; done
+  [ "$w" = 1 ] && ok "synth watchdog: hung edge-tts times out into say" || bad "synth watchdog: never fell back"
+  rm -rf "$T6"
+else
+  echo "SKIP: speak.sh synth watchdog (needs macOS)"
+fi
+
+# ── 2.10 节奏本体：一次回车放一条，不是一次回车放一串 ──────────────────────
+if [ "$(uname)" = "Darwin" ] && command -v jq >/dev/null 2>&1; then
+  T7="$(mktemp -d)"
+  mkdir -p "$T7/bin" "$T7/tmp/cc-voice"
+  printf '#!/bin/bash\nexit 1\n' > "$T7/bin/edge-tts"
+  printf '#!/bin/bash\nsleep 0.4\necho "$*" >> "%s/spoken.log"\n' "$T7" > "$T7/bin/say"
+  chmod +x "$T7/bin/edge-tts" "$T7/bin/say"
+  spoke7() { tr '\n' ' ' < "$T7/spoken.log" 2>/dev/null || true; }
+  ack7() { printf '{"session_id":"%s"}' "$1" | env TMPDIR="$T7/tmp" "$ROOT/hooks/tts-ack.sh"; }
+  for c in one two three; do
+    env PATH="$T7/bin:$PATH" TMPDIR="$T7/tmp" CC_TTS_ACK_TIMEOUT=30 \
+      "$ROOT/hooks/speak.sh" --channel "s-$c" --lane "" "$c"
+    sleep 0.1
+  done
+  sleep 1.2
+  check "ack rhythm: first lane speaks, the rest wait" "^one *$" "$(spoke7)"
+  ack7 s-one; sleep 1.2
+  check "ack rhythm: one Enter releases exactly one" "^one two *$" "$(spoke7)"
+  ack7 s-two; sleep 1.2
+  check "ack rhythm: next Enter releases the next" "^one two three *$" "$(spoke7)"
+  rm -rf "$T7"
+else
+  echo "SKIP: speak.sh ack rhythm (needs macOS + jq)"
+fi
+
 # ── 3. install / uninstall e2e (throwaway HOME) ─────────────────────────────
 if [ "$(uname)" = "Darwin" ] && command -v jq >/dev/null 2>&1; then
   T="$(mktemp -d)"

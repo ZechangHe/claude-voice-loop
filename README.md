@@ -11,7 +11,7 @@ Claude Code ships voice *input* (`/voice`) but has no voice *output* — the fea
 - **`cv`** — conversational mode. A system prompt teaches the model to end every reply with one plain-speech 🔊 summary line (no jargon, no file names — written for a smart listener who doesn't code). The Stop hook reads exactly that line aloud.
 - **`fcv`** — full read-aloud mode. The entire reply is spoken; code blocks, inline code, tables, and markdown are stripped before they reach the voice.
 - **`mcv`** — multi-agent lane mode, for babysitting several parallel Claude Code lanes. No summaries at all: each lane just says **"macos-1 is done"** (its worktree name) when a reply ends, and the ack gate is off — as soon as one lane finishes speaking the next one starts, no Enter required. A lane that needs you can still say so by ending its reply with a short 🔊 line.
-- **Multi-session arbitration** — run several Claude Code sessions at once: audio queues instead of overlapping, a session announces itself ("mobile here:") when it isn't the one you were just typing in, and an *ack gate* keeps broadcasts from machine-gunning back-to-back — the next session's broadcast waits for your Enter (up to 45 s). In `mcv` the gate steps aside; the queue still serializes playback.
+- **Multi-session arbitration** — run several Claude Code sessions at once: broadcasts take a ticket **the moment their lane finishes**, so they play in finish order instead of overlapping or racing; a session announces itself ("mobile here:") when it isn't the one you were just typing in; an *ack gate* keeps broadcasts from machine-gunning back-to-back — one Enter releases exactly one, the next waits for the next Enter (up to 45 s); and a lane you have **already replied to** silently drops its still-queued broadcast (you read it on screen already — hearing it afterwards is just noise). In `mcv` the gate steps aside; the queue still orders playback.
 - **Questions read aloud** — when Claude asks a multiple-choice question, the question and options are spoken too.
 - **`mute`** — toggle silence (also cuts off anything currently playing). **Fn key** — optional global listener: press to cut off the current sentence without muting; keep it held (push-to-talk) and new broadcasts wait until you release.
 - **edge-tts** neural voice (free, no API key) with automatic fallback to macOS `say`.
@@ -61,7 +61,7 @@ reply ends ── Stop hook ──▶ tts-stop.sh ──▶ 🔊 line (cv) / cle
                                        speak.sh ──▶ edge-tts mp3 ──▶ afplay
                                               (fallback: macOS say)
 
-you press Enter ── UserPromptSubmit ──▶ tts-ack.sh    releases the ack gate
+you press Enter ── UserPromptSubmit ──▶ tts-ack.sh    releases the next one + cancels this lane's queued broadcast
 Claude asks a question ── PreToolUse ──▶ tts-ask.sh   reads question + options
 you press Fn ──▶ fn-hush (CGEventTap) ──▶ hush.sh     cuts off the current sentence
 you hold Fn ──▶ heartbeat flag ──▶ speak.sh           holds new broadcasts until release
@@ -69,7 +69,10 @@ you hold Fn ──▶ heartbeat flag ──▶ speak.sh           holds new broa
 
 Design notes for the curious:
 
-- **Synthesis before the lock** — mp3 is generated *before* a session waits for the shared audio lock, so queue time is pure playback, never synthesis.
+- **Ticket taken at finish time** — a broadcast takes its queue number *before* synthesis starts, so playback order follows which lane finished first, never which mp3 happened to render fastest (synthesis overlaps the wait, so the audio is ready by the time your turn comes). The old build had every broadcast `mkdir`-race for one lock — whoever's poll landed on the release won, which sounded random.
+- **Only the head speaks** — the queue *is* the mutex; no separate audio lock. Waiters re-check the head every 0.15 s and prune dead tickets (interrupted or crashed lanes), so a corpse can never wedge the line.
+- **Replying cancels** — pressing Enter in a lane drops an *expiry watermark* for it (`tts-ack.sh`); queued broadcasts with a ticket at or below the watermark bow out. The reply to that very prompt takes a higher ticket, so it is never affected.
+- **Synthesis watchdog** — a stuck head would stall the whole line, so edge-tts is killed after 12 s (`CC_TTS_SYNTH_TIMEOUT`) and falls back to `say`.
 - **Identity decided at play time** — whether to announce "mobile here:" is checked the moment audio starts, not when the text was generated; a broadcast held back by the ack gate would otherwise announce stale context.
 - **Same-session interruption** — a new reply kills its own previous playback (whole process group), so a fast follow-up never queues behind itself.
 - **Sentence-boundary fallback** — in `cv` mode, replies without a 🔊 line get truncated at the last full sentence within 200 chars plus "details are on screen" — never mid-sentence.
@@ -85,6 +88,7 @@ Design notes for the curious:
 | `CC_VOICE_FULL` | unset | `1` = full read-aloud (this is all `fcv` adds) |
 | `CC_VOICE_MULTI` | unset | `1` = multi-agent lane mode: fixed "<lane> is done" phrase, ack gate off (this is all `mcv` adds) |
 | `CC_TTS_ACK_TIMEOUT` | `45` | Seconds a queued broadcast waits for your Enter before playing anyway |
+| `CC_TTS_SYNTH_TIMEOUT` | `12` | Seconds before a hung edge-tts is killed and `say` takes over (keeps the queue head from stalling the line) |
 | `CC_TTS_ASK_PHRASE` | `要选一下：` | Spoken lead-in for multiple-choice questions |
 | `CC_TTS_LANE_TEMPLATE` | `%s 这边：` | printf template for the session announcement (e.g. `"%s here: "`) |
 | `CC_TTS_DONE_TEMPLATE` | `%s 搞定了` | mcv: what a finished lane says (e.g. `"%s is done"`) |
