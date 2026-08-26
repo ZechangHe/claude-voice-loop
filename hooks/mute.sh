@@ -20,7 +20,7 @@ else
     [ -n "$PID" ] && kill -- "-$PID" 2>/dev/null
     rm -f "$P"
   done
-  rm -rf "$CACHE_DIR/lock" 2>/dev/null
+  rm -rf "$CACHE_DIR/lock" "$CACHE_DIR/qlock" 2>/dev/null
   echo "🔇 已静音（再敲一次 mute 恢复）"
 fi
 exit 0

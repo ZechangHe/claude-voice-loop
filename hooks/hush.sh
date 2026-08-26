@@ -12,5 +12,5 @@ for P in "$CACHE_DIR"/play-*.pid; do
   [ -n "$PID" ] && kill -- "-$PID" 2>/dev/null
   rm -f "$P"
 done
-rm -rf "$CACHE_DIR/lock" 2>/dev/null
+rm -rf "$CACHE_DIR/lock" "$CACHE_DIR/qlock" 2>/dev/null
 exit 0
