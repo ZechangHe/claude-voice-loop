@@ -85,6 +85,8 @@ Claude 出选择题 ── PreToolUse ──▶ tts-ask.sh  念题目 + 选项
 | 环境变量 | 默认值 | 含义 |
 |---|---|---|
 | `CC_VOICE_NAME` | `zh-CN-YunjianNeural` | 任意 edge-tts 嗓音（`edge-tts --list-voices`） |
+| `CC_TTS_RATE` | `+25%` | edge-tts 语速（要更快 `+40%`，回原速 `+0%`） |
+| `CC_TTS_SAY_RATE` | `210` | 降级到 `say` 时的语速（词/分钟，系统默认约 175） |
 | `CC_VOICE_FULL` | 未设 | `1` = 全文朗读（`fcv` 的全部秘密就是它） |
 | `CC_VOICE_MULTI` | 未设 | `1` = 多 agent 车道模式：固定念「车道名 + 搞定了」，应答闸关掉（`mcv` 的全部秘密） |
 | `CC_TTS_ACK_TIMEOUT` | `45` | 排队播报等回车的秒数，超时强制放行 |

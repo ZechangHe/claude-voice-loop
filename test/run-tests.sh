@@ -139,7 +139,7 @@ if [ "$(uname)" = "Darwin" ]; then
   T3="$(mktemp -d)"
   mkdir -p "$T3/bin" "$T3/tmp/cc-voice"
   printf '#!/bin/bash\nexit 1\n' > "$T3/bin/edge-tts"   # force the say fallback
-  printf '#!/bin/bash\necho "$*" >> "%s/spoken.log"\n' "$T3" > "$T3/bin/say"
+  printf '#!/bin/bash\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T3" > "$T3/bin/say"
   chmod +x "$T3/bin/edge-tts" "$T3/bin/say"
   GATEF="$T3/tmp/cc-voice/await-ack"
 
@@ -184,7 +184,7 @@ case "$*" in
 esac
 exit 1
 STUB
-  printf '#!/bin/bash\nsleep 0.2\necho "$*" >> "%s/spoken.log"\n' "$T4" > "$T4/bin/say"
+  printf '#!/bin/bash\nsleep 0.2\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T4" > "$T4/bin/say"
   chmod +x "$T4/bin/edge-tts" "$T4/bin/say"
   for i in 1 2 3; do
     env PATH="$T4/bin:$PATH" TMPDIR="$T4/tmp" CC_VOICE_MULTI=1 \
@@ -207,7 +207,7 @@ if [ "$(uname)" = "Darwin" ] && command -v jq >/dev/null 2>&1; then
   T5="$(mktemp -d)"
   mkdir -p "$T5/bin" "$T5/tmp/cc-voice"
   printf '#!/bin/bash\nexit 1\n' > "$T5/bin/edge-tts"
-  printf '#!/bin/bash\nsleep 0.6\necho "$*" >> "%s/spoken.log"\n' "$T5" > "$T5/bin/say"
+  printf '#!/bin/bash\nsleep 0.6\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T5" > "$T5/bin/say"
   chmod +x "$T5/bin/edge-tts" "$T5/bin/say"
   for c in one two three; do
     env PATH="$T5/bin:$PATH" TMPDIR="$T5/tmp" CC_VOICE_MULTI=1 \
@@ -232,12 +232,14 @@ else
   echo "SKIP: speak.sh stale-drop (needs macOS + jq)"
 fi
 
+# 注：say 桩统一先吃掉 `-r <wpm>`（speak.sh 的 CC_TTS_SAY_RATE 会带这两个参数），
+# 只把真正被念的文本记进 spoken.log —— 断言比的是"念了什么"，不该被语速参数污染。
 # ── 2.9 合成看门狗：edge-tts 挂死不能拖住整个队列，超时降级 say ───────────────
 if [ "$(uname)" = "Darwin" ]; then
   T6="$(mktemp -d)"
   mkdir -p "$T6/bin" "$T6/tmp/cc-voice"
   printf '#!/bin/bash\nsleep 30\n' > "$T6/bin/edge-tts"
-  printf '#!/bin/bash\necho "$*" >> "%s/spoken.log"\n' "$T6" > "$T6/bin/say"
+  printf '#!/bin/bash\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T6" > "$T6/bin/say"
   chmod +x "$T6/bin/edge-tts" "$T6/bin/say"
   env PATH="$T6/bin:$PATH" TMPDIR="$T6/tmp" CC_VOICE_MULTI=1 CC_TTS_SYNTH_TIMEOUT=1 \
     "$ROOT/hooks/speak.sh" --channel w1 --lane "" "watchdog test"
@@ -254,7 +256,7 @@ if [ "$(uname)" = "Darwin" ] && command -v jq >/dev/null 2>&1; then
   T7="$(mktemp -d)"
   mkdir -p "$T7/bin" "$T7/tmp/cc-voice"
   printf '#!/bin/bash\nexit 1\n' > "$T7/bin/edge-tts"
-  printf '#!/bin/bash\nsleep 0.4\necho "$*" >> "%s/spoken.log"\n' "$T7" > "$T7/bin/say"
+  printf '#!/bin/bash\nsleep 0.4\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T7" > "$T7/bin/say"
   chmod +x "$T7/bin/edge-tts" "$T7/bin/say"
   spoke7() { tr '\n' ' ' < "$T7/spoken.log" 2>/dev/null || true; }
   ack7() { printf '{"session_id":"%s"}' "$1" | env TMPDIR="$T7/tmp" "$ROOT/hooks/tts-ack.sh"; }

@@ -85,6 +85,8 @@ Design notes for the curious:
 | Env var | Default | Meaning |
 |---|---|---|
 | `CC_VOICE_NAME` | `zh-CN-YunjianNeural` | Any edge-tts voice (`edge-tts --list-voices`) |
+| `CC_TTS_RATE` | `+25%` | edge-tts speaking rate (`+40%` faster, `+0%` original speed) |
+| `CC_TTS_SAY_RATE` | `210` | Words per minute for the `say` fallback (system default is about 175) |
 | `CC_VOICE_FULL` | unset | `1` = full read-aloud (this is all `fcv` adds) |
 | `CC_VOICE_MULTI` | unset | `1` = multi-agent lane mode: fixed "<lane> is done" phrase, ack gate off (this is all `mcv` adds) |
 | `CC_TTS_ACK_TIMEOUT` | `45` | Seconds a queued broadcast waits for your Enter before playing anyway |

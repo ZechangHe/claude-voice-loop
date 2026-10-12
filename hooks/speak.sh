@@ -19,7 +19,9 @@
 # 松开 Fn 才放行；心跳断了（fn-hush 没在跑/已崩）按过期忽略，不会哑掉。
 # 身份前缀：开播那刻才定（生成时定会串台——播报可能被闸憋着迟到）：
 # 用户最近打字的会话 ≠ 本条、或上一条开播的 ≠ 本条 → 先念「<lane> 这边：」报家门。
-# 环境旋钮：CC_VOICE_NAME=edge-tts 嗓音；CC_TTS_LANE_TEMPLATE=报家门句式（printf 模板，
+# 环境旋钮：CC_TTS_RATE=语速（edge-tts 格式，默认 +25%；要更快 +40%，回原速 +0%）；
+# CC_TTS_SAY_RATE=say 降级时的语速（词/分钟，默认 210，系统默认约 175）；
+# CC_VOICE_NAME=edge-tts 嗓音；CC_TTS_LANE_TEMPLATE=报家门句式（printf 模板，
 # 默认「%s 这边：」，英文可设 "%s here: "）；CC_TTS_SYNTH_TIMEOUT=合成挂死的兜底秒数
 # （默认 12——队头卡在合成上会拖住整队，超时就掐掉降级 say）。
 # 存在 tts-off 文件时全局静音。
@@ -57,6 +59,8 @@ MULTI="${CC_VOICE_MULTI:-0}"
 VOICE="${CC_VOICE_NAME:-zh-CN-YunjianNeural}"
 LANE_TMPL="${CC_TTS_LANE_TEMPLATE:-%s 这边：}"
 SYNTH_TO="${CC_TTS_SYNTH_TIMEOUT:-12}"
+RATE="${CC_TTS_RATE:-+25%}"
+SAY_RATE="${CC_TTS_SAY_RATE:-210}"
 MP3="$CACHE_DIR/say-$SAFE_CH-$$.mp3"
 
 # 同 channel：打断上一句（整个进程组，含排队中的）
@@ -130,7 +134,7 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
   # 合成带超时：队头卡在合成上会拖住整个队列，挂死就掐掉降级 say
   synth() { # $1=文本 $2=输出 mp3
     command -v edge-tts >/dev/null 2>&1 || return 1
-    edge-tts --voice "$VOICE" --text "$1" --write-media "$2" >/dev/null 2>&1 &
+    edge-tts --voice "$VOICE" --rate "$RATE" --text "$1" --write-media "$2" >/dev/null 2>&1 &
     ep=$!
     s=0
     while kill -0 "$ep" 2>/dev/null; do
@@ -151,11 +155,13 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
   ENGINE=say
   if synth "$TEXT" "$MP3"; then ENGINE=edge-tts; fi
 
-  # 车道报家门 mp3 按 内容×嗓音 落盘缓存（key 含文本哈希，换句式/嗓音自动重烤）
+  # 车道报家门 mp3 按 内容×嗓音×语速 落盘缓存（key 含文本哈希，换句式/嗓音/语速自动重烤）
+  # ⚠️ 语速必须进 key：不进的话调快语速后，缓存里那句「xx 这边：」还是旧速度，
+  #    跟提速后的正文接在一起听着像卡带。
   PRE_MP3=""
   if [ -n "$PRE_TEXT" ] && [ "$ENGINE" = "edge-tts" ]; then
     SAFE_LANE="$(printf '%s' "$LANE" | tr -c 'a-zA-Z0-9_-' '_')"
-    PRE_HASH="$(printf '%s|%s' "$PRE_TEXT" "$VOICE" | cksum | cut -d' ' -f1)"
+    PRE_HASH="$(printf '%s|%s|%s' "$PRE_TEXT" "$VOICE" "$RATE" | cksum | cut -d' ' -f1)"
     PRE_MP3="$CACHE_DIR/lane-$SAFE_LANE-$PRE_HASH.mp3"
     if [ ! -s "$PRE_MP3" ]; then
       synth "$PRE_TEXT" "$PRE_MP3" || rm -f "$PRE_MP3"
@@ -226,7 +232,7 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
     else
       MSG="$TEXT"
       [ "$SPEAK_PREFIX" -eq 1 ] && MSG="${PRE_TEXT}${TEXT}"
-      say "$MSG"
+      say -r "$SAY_RATE" "$MSG"
     fi
     # mcv 没有回车当节拍器，两条之间留半口气，别糊成一句
     [ "$MULTI" = "1" ] && sleep 0.35
