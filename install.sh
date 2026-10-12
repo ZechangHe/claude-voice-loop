@@ -38,7 +38,7 @@ install_file() { # $1=src  $2=dst  (backs up a differing existing dst once)
   if [ -f "$2" ] && ! cmp -s "$1" "$2"; then cp "$2" "$2.bak"; fi
   cp "$1" "$2"
 }
-for f in speak.sh tts-stop.sh tts-ask.sh tts-ack.sh mute.sh hush.sh; do
+for f in speak.sh tts-stop.sh tts-ask.sh tts-ack.sh mute.sh hush.sh edge-tts-shim.py; do
   install_file "$REPO_DIR/hooks/$f" "$HOOKS_DIR/$f"
   chmod +x "$HOOKS_DIR/$f"
 done

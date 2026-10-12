@@ -10,6 +10,9 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 ROOT="$PWD"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+# speak.sh 见到 hooks/edge-tts-shim.py 会绕过 PATH 上的 edge-tts 桩、直接用真 python 联网合成；
+# 桩测试一律关掉垫片，只有 2.11 专门测垫片路由时再打开。
+export CC_TTS_EDGE_SHIM=/nonexistent
 
 pass=0; fail=0
 ok()  { pass=$((pass+1)); echo "PASS: $1"; }
@@ -274,6 +277,33 @@ if [ "$(uname)" = "Darwin" ] && command -v jq >/dev/null 2>&1; then
   rm -rf "$T7"
 else
   echo "SKIP: speak.sh ack rhythm (needs macOS + jq)"
+fi
+
+# ── 2.11 edge-tts 端点垫片：垫片在 → 用 edge-tts 的 shebang python 跑垫片、参数原样透传 ──
+if [ "$(uname)" = "Darwin" ]; then
+  T8="$(mktemp -d)"
+  mkdir -p "$T8/bin" "$T8/tmp/cc-voice"
+  # 假 python：-c 探测 edge_tts 一律说有；被当解释器跑垫片时记下参数、写出非空 mp3
+  cat > "$T8/bin/fakepy" <<STUB
+#!/bin/bash
+[ "\$1" = "-c" ] && exit 0
+printf '%s\n' "\$@" > "$T8/shim-args.log"
+while [ \$# -gt 0 ]; do [ "\$1" = "--write-media" ] && printf 'ID3' > "\$2"; shift; done
+STUB
+  printf '#!%s\nexit 1\n' "$T8/bin/fakepy" > "$T8/bin/edge-tts"   # 正牌命令若被走到就失败
+  printf '#!/bin/bash\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T8" > "$T8/bin/say"
+  printf '#!/bin/bash\necho afplay >> "%s/spoken.log"\n' "$T8" > "$T8/bin/afplay"
+  printf '# shim\n' > "$T8/shim.py"
+  chmod +x "$T8/bin/fakepy" "$T8/bin/edge-tts" "$T8/bin/say" "$T8/bin/afplay"
+  env PATH="$T8/bin:$PATH" TMPDIR="$T8/tmp" CC_VOICE_MULTI=1 CC_TTS_EDGE_SHIM="$T8/shim.py" \
+    "$ROOT/hooks/speak.sh" --channel sh1 --lane "" "shim route"
+  for _ in $(seq 1 40); do [ -s "$T8/spoken.log" ] && break; sleep 0.1; done
+  check "shim: shebang python runs the shim first" "^$T8/shim.py$" "$(head -1 "$T8/shim-args.log" 2>/dev/null)"
+  check "shim: CLI args pass through" "^shim route$" "$(grep -A1 -- '--text' "$T8/shim-args.log" 2>/dev/null | tail -1)"
+  check "shim: shim audio plays (no say fallback)" "^afplay$" "$(cat "$T8/spoken.log" 2>/dev/null)"
+  rm -rf "$T8"
+else
+  echo "SKIP: speak.sh edge-tts shim (needs macOS)"
 fi
 
 # ── 3. install / uninstall e2e (throwaway HOME) ─────────────────────────────

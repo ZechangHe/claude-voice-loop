@@ -15,6 +15,7 @@ Claude Code 官方有语音*输入*（`/voice`，且不支持中文），但语�
 - **选择题也念** —— Claude 出选择题时，题目和选项一并念出来。
 - **`mute`** —— 静音开关（顺手掐断正在播的）。**Fn 键** —— 可选的全局监听器：按一下掐断当前这句（不进入静音）；按住不放（按住说话）期间新播报憋住不响，松开才放行。
 - **edge-tts** 免费神经网络嗓音（无需 API key），失败自动降级 macOS `say`。
+  - **端点垫片（2026-10-12）** —— 微软把朗读服务搬到了 `api.msedgeservices.com`，旧地址现在一律 403，而 PyPI 上的 edge-tts（7.2.8）还指着旧地址（[rany2/edge-tts#490](https://github.com/rany2/edge-tts/issues/490)）。`hooks/edge-tts-shim.py` 让正牌 edge-tts 命令改连新地址（旧地址留作 403 时的退路）。等 `pip install -U edge-tts` 之后裸跑 `edge-tts --text hi --write-media x.mp3` 又能出声了，删掉 `~/.claude/hooks/edge-tts-shim.py`，speak.sh 自动回到正牌命令。
 
 ## 真·语音对话开发
 
@@ -91,6 +92,7 @@ Claude 出选择题 ── PreToolUse ──▶ tts-ask.sh  念题目 + 选项
 | `CC_VOICE_MULTI` | 未设 | `1` = 多 agent 车道模式：固定念「车道名 + 搞定了」，应答闸关掉（`mcv` 的全部秘密） |
 | `CC_TTS_ACK_TIMEOUT` | `45` | 排队播报等回车的秒数，超时强制放行 |
 | `CC_TTS_SYNTH_TIMEOUT` | `12` | edge-tts 合成挂死多少秒后掐掉降级 `say`（防队头拖住整队） |
+| `CC_TTS_EDGE_SHIM` | `~/.claude/hooks/edge-tts-shim.py` | 端点垫片：文件在就经它合成（见上方 edge-tts 那条）；指到不存在的路径 = 直接用正牌 `edge-tts` 命令 |
 | `CC_TTS_ASK_PHRASE` | `要选一下：` | 选择题的开场白 |
 | `CC_TTS_LANE_TEMPLATE` | `%s 这边：` | 报家门句式（printf 模板，英文如 `"%s here: "`） |
 | `CC_TTS_DONE_TEMPLATE` | `%s 搞定了` | mcv：车道干完活念的那句 |

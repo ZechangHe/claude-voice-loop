@@ -131,10 +131,29 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
   }
   give_up() { q_leave; rm -f "$MP3"; exit 0; }
 
+  # edge-tts 端点垫片（2026-10-12）：微软把朗读服务搬到 api.msedgeservices.com，旧端点握手 403，
+  # PyPI 上的 edge-tts 还指着旧端点。垫片文件在 → 用装着 edge_tts 的那个 python 跑垫片
+  # （先认 edge-tts 命令自己的 shebang，再试 python3 / python——Windows 的 python3 是商店空壳）；
+  # 垫片不在或找不到 python → 正牌 edge-tts 命令。上游修好后删垫片文件即回落。
+  EDGE_SHIM="${CC_TTS_EDGE_SHIM:-$HOOK_DIR/edge-tts-shim.py}"
+  EDGE_PY=""
+  if [ -f "$EDGE_SHIM" ]; then
+    SHEBANG_PY="$(sed -n '1s/^#![[:space:]]*//p' "$(command -v edge-tts 2>/dev/null || echo /dev/null)" 2>/dev/null)"
+    for py in "$SHEBANG_PY" python3 python; do
+      [ -n "$py" ] || continue
+      "$py" -c 'import importlib.util as u,sys; sys.exit(u.find_spec("edge_tts") is None)' >/dev/null 2>&1 \
+        && { EDGE_PY="$py"; break; }
+    done
+  fi
+
   # 合成带超时：队头卡在合成上会拖住整个队列，挂死就掐掉降级 say
   synth() { # $1=文本 $2=输出 mp3
-    command -v edge-tts >/dev/null 2>&1 || return 1
-    edge-tts --voice "$VOICE" --rate "$RATE" --text "$1" --write-media "$2" >/dev/null 2>&1 &
+    if [ -n "$EDGE_PY" ]; then
+      "$EDGE_PY" "$EDGE_SHIM" --voice "$VOICE" --rate "$RATE" --text "$1" --write-media "$2" >/dev/null 2>&1 &
+    else
+      command -v edge-tts >/dev/null 2>&1 || return 1
+      edge-tts --voice "$VOICE" --rate "$RATE" --text "$1" --write-media "$2" >/dev/null 2>&1 &
+    fi
     ep=$!
     s=0
     while kill -0 "$ep" 2>/dev/null; do
