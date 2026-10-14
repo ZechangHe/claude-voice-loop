@@ -21,6 +21,21 @@ check() { # name, grep-pattern, actual
   if printf '%s' "$3" | grep -q "$2"; then ok "$1"; else bad "$1 — got: [$3]"; fi
 }
 
+# say 桩（所有桩测试共用）：-v ? 报一个 Tingting（让 auto 能选到它）；-v X / -r N 剥掉只把正文
+# 记进 spoken.log；原始参数另记 say-args.log（2.12 查嗓音参数用）。$2 = 开口前先睡几秒（可选）。
+mk_say_stub() { # $1=dir  $2=sleep
+  cat > "$1/bin/say" <<STUB
+#!/bin/bash
+printf '%s\\n' "\$*" >> "$1/say-args.log"
+[ "\$1" = "-v" ] && [ "\$2" = "?" ] && { echo "Tingting            zh_CN    # 你好！我叫婷婷。"; exit 0; }
+${2:+sleep $2}
+[ "\$1" = "-v" ] && shift 2
+[ "\$1" = "-r" ] && shift 2
+echo "\$*" >> "$1/spoken.log"
+STUB
+  chmod +x "$1/bin/say"
+}
+
 # ── 1. syntax ────────────────────────────────────────────────────────────────
 for f in hooks/*.sh install.sh uninstall.sh test/run-tests.sh; do
   if bash -n "$f" 2>/dev/null; then ok "syntax: $f"; else bad "syntax: $f"; fi
@@ -110,7 +125,7 @@ if [ "$(uname)" = "Darwin" ]; then
   T2="$(mktemp -d)"
   mkdir -p "$T2/bin" "$T2/tmp/cc-voice"
   printf '#!/bin/bash\nexit 1\n' > "$T2/bin/edge-tts"   # force the say fallback
-  printf '#!/bin/bash\necho spoken >> "%s/spoken.log"\n' "$T2" > "$T2/bin/say"
+  mk_say_stub "$T2"
   chmod +x "$T2/bin/edge-tts" "$T2/bin/say"
   FN="$T2/tmp/cc-voice/fn-down"
 
@@ -142,7 +157,7 @@ if [ "$(uname)" = "Darwin" ]; then
   T3="$(mktemp -d)"
   mkdir -p "$T3/bin" "$T3/tmp/cc-voice"
   printf '#!/bin/bash\nexit 1\n' > "$T3/bin/edge-tts"   # force the say fallback
-  printf '#!/bin/bash\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T3" > "$T3/bin/say"
+  mk_say_stub "$T3"
   chmod +x "$T3/bin/edge-tts" "$T3/bin/say"
   GATEF="$T3/tmp/cc-voice/await-ack"
 
@@ -187,7 +202,7 @@ case "$*" in
 esac
 exit 1
 STUB
-  printf '#!/bin/bash\nsleep 0.2\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T4" > "$T4/bin/say"
+  mk_say_stub "$T4" 0.2
   chmod +x "$T4/bin/edge-tts" "$T4/bin/say"
   for i in 1 2 3; do
     env PATH="$T4/bin:$PATH" TMPDIR="$T4/tmp" CC_VOICE_MULTI=1 \
@@ -210,7 +225,7 @@ if [ "$(uname)" = "Darwin" ] && command -v jq >/dev/null 2>&1; then
   T5="$(mktemp -d)"
   mkdir -p "$T5/bin" "$T5/tmp/cc-voice"
   printf '#!/bin/bash\nexit 1\n' > "$T5/bin/edge-tts"
-  printf '#!/bin/bash\nsleep 0.6\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T5" > "$T5/bin/say"
+  mk_say_stub "$T5" 0.6
   chmod +x "$T5/bin/edge-tts" "$T5/bin/say"
   for c in one two three; do
     env PATH="$T5/bin:$PATH" TMPDIR="$T5/tmp" CC_VOICE_MULTI=1 \
@@ -242,7 +257,7 @@ if [ "$(uname)" = "Darwin" ]; then
   T6="$(mktemp -d)"
   mkdir -p "$T6/bin" "$T6/tmp/cc-voice"
   printf '#!/bin/bash\nsleep 30\n' > "$T6/bin/edge-tts"
-  printf '#!/bin/bash\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T6" > "$T6/bin/say"
+  mk_say_stub "$T6"
   chmod +x "$T6/bin/edge-tts" "$T6/bin/say"
   env PATH="$T6/bin:$PATH" TMPDIR="$T6/tmp" CC_VOICE_MULTI=1 CC_TTS_SYNTH_TIMEOUT=1 \
     "$ROOT/hooks/speak.sh" --channel w1 --lane "" "watchdog test"
@@ -259,7 +274,7 @@ if [ "$(uname)" = "Darwin" ] && command -v jq >/dev/null 2>&1; then
   T7="$(mktemp -d)"
   mkdir -p "$T7/bin" "$T7/tmp/cc-voice"
   printf '#!/bin/bash\nexit 1\n' > "$T7/bin/edge-tts"
-  printf '#!/bin/bash\nsleep 0.4\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T7" > "$T7/bin/say"
+  mk_say_stub "$T7" 0.4
   chmod +x "$T7/bin/edge-tts" "$T7/bin/say"
   spoke7() { tr '\n' ' ' < "$T7/spoken.log" 2>/dev/null || true; }
   ack7() { printf '{"session_id":"%s"}' "$1" | env TMPDIR="$T7/tmp" "$ROOT/hooks/tts-ack.sh"; }
@@ -291,7 +306,7 @@ printf '%s\n' "\$@" > "$T8/shim-args.log"
 while [ \$# -gt 0 ]; do [ "\$1" = "--write-media" ] && printf 'ID3' > "\$2"; shift; done
 STUB
   printf '#!%s\nexit 1\n' "$T8/bin/fakepy" > "$T8/bin/edge-tts"   # 正牌命令若被走到就失败
-  printf '#!/bin/bash\n[ "$1" = "-r" ] && shift 2\necho "$*" >> "%s/spoken.log"\n' "$T8" > "$T8/bin/say"
+  mk_say_stub "$T8"
   printf '#!/bin/bash\necho afplay >> "%s/spoken.log"\n' "$T8" > "$T8/bin/afplay"
   printf '# shim\n' > "$T8/shim.py"
   chmod +x "$T8/bin/fakepy" "$T8/bin/edge-tts" "$T8/bin/say" "$T8/bin/afplay"
@@ -301,9 +316,39 @@ STUB
   check "shim: shebang python runs the shim first" "^$T8/shim.py$" "$(head -1 "$T8/shim-args.log" 2>/dev/null)"
   check "shim: CLI args pass through" "^shim route$" "$(grep -A1 -- '--text' "$T8/shim-args.log" 2>/dev/null | tail -1)"
   check "shim: shim audio plays (no say fallback)" "^afplay$" "$(cat "$T8/spoken.log" 2>/dev/null)"
+  check "engine.log: records edge-tts on success" "engine=edge-tts text=shim route" "$(cat "$T8/tmp/cc-voice/engine.log" 2>/dev/null)"
   rm -rf "$T8"
 else
   echo "SKIP: speak.sh edge-tts shim (needs macOS)"
+fi
+
+# ── 2.12 say 降级：中文点名 Tingting、拉丁文用系统默认、CC_TTS_SAY_VOICE 可强制；engine.log 记降级原因 ──
+# 2026-10-14：系统默认嗓音是英文的，拿到中文念成一串「FFFFFF」——这就是播报时不时冒乱音的真凶。
+if [ "$(uname)" = "Darwin" ]; then
+  T9="$(mktemp -d)"
+  mkdir -p "$T9/bin" "$T9/tmp/cc-voice"
+  printf '#!/bin/bash\necho "  5%%|##  | 1/20" >&2\necho "WSServerHandshakeError: 403 Invalid response status" >&2\nexit 1\n' > "$T9/bin/edge-tts"
+  chmod +x "$T9/bin/edge-tts"
+  mk_say_stub "$T9"
+  env PATH="$T9/bin:$PATH" TMPDIR="$T9/tmp" CC_VOICE_MULTI=1 \
+    "$ROOT/hooks/speak.sh" --channel sv1 --lane "" "中文降级测试"
+  for _ in $(seq 1 40); do [ -s "$T9/spoken.log" ] && break; sleep 0.1; done
+  check "say voice: Chinese text names Tingting" "^-v Tingting -r " "$(grep -- '-r ' "$T9/say-args.log" 2>/dev/null | tail -1)"
+  check "say voice: spoken text intact" "^中文降级测试$" "$(cat "$T9/spoken.log" 2>/dev/null)"
+  check "engine.log: records say + the real error line" "engine=say reason=\[WSServerHandshakeError: 403" "$(cat "$T9/tmp/cc-voice/engine.log" 2>/dev/null)"
+  rm -f "$T9/spoken.log" "$T9/say-args.log"
+  env PATH="$T9/bin:$PATH" TMPDIR="$T9/tmp" CC_VOICE_MULTI=1 \
+    "$ROOT/hooks/speak.sh" --channel sv2 --lane "" "english only"
+  for _ in $(seq 1 40); do [ -s "$T9/spoken.log" ] && break; sleep 0.1; done
+  check "say voice: Latin text keeps the system voice" "^-r " "$(grep -- '-r ' "$T9/say-args.log" 2>/dev/null | tail -1)"
+  rm -f "$T9/spoken.log" "$T9/say-args.log"
+  env PATH="$T9/bin:$PATH" TMPDIR="$T9/tmp" CC_VOICE_MULTI=1 CC_TTS_SAY_VOICE=Meijia \
+    "$ROOT/hooks/speak.sh" --channel sv3 --lane "" "点名嗓音"
+  for _ in $(seq 1 40); do [ -s "$T9/spoken.log" ] && break; sleep 0.1; done
+  check "say voice: CC_TTS_SAY_VOICE forces a voice" "^-v Meijia -r " "$(grep -- '-r ' "$T9/say-args.log" 2>/dev/null | tail -1)"
+  rm -rf "$T9"
+else
+  echo "SKIP: say voice / engine.log (needs macOS)"
 fi
 
 # ── 3. install / uninstall e2e (throwaway HOME) ─────────────────────────────

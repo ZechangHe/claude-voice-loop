@@ -21,6 +21,11 @@
 # 用户最近打字的会话 ≠ 本条、或上一条开播的 ≠ 本条 → 先念「<lane> 这边：」报家门。
 # 环境旋钮：CC_TTS_RATE=语速（edge-tts 格式，默认 +25%；要更快 +40%，回原速 +0%）；
 # CC_TTS_SAY_RATE=say 降级时的语速（词/分钟，默认 210，系统默认约 175）；
+# CC_TTS_SAY_VOICE=say 降级用的嗓音（默认 auto：文本带汉字且本机装了 Tingting 就点名它，
+# 否则系统默认嗓音；系统默认嗓音多半是英文的，拿到中文会念成一串乱音——2026-10-14 实测
+# 「FFFFFF」就是它；填任意 `say -v '?'` 里的名字可强制，填空串 = 永远系统默认）；
+# 每次开播在 $TMPDIR/cc-voice/engine.log 记一行（时间 / 会话 / 引擎 / 降级原因 / 文本开头），
+# 嗓音突然不对劲先看它；超 2000 行自动砍到 1000；
 # CC_VOICE_NAME=edge-tts 嗓音；CC_TTS_LANE_TEMPLATE=报家门句式（printf 模板，
 # 默认「%s 这边：」，英文可设 "%s here: "）；CC_TTS_SYNTH_TIMEOUT=合成挂死的兜底秒数
 # （默认 12——队头卡在合成上会拖住整队，超时就掐掉降级 say）。
@@ -61,6 +66,8 @@ LANE_TMPL="${CC_TTS_LANE_TEMPLATE:-%s 这边：}"
 SYNTH_TO="${CC_TTS_SYNTH_TIMEOUT:-12}"
 RATE="${CC_TTS_RATE:-+25%}"
 SAY_RATE="${CC_TTS_SAY_RATE:-210}"
+SAY_VOICE="${CC_TTS_SAY_VOICE-auto}"
+ELOG="$CACHE_DIR/engine.log"
 MP3="$CACHE_DIR/say-$SAFE_CH-$$.mp3"
 
 # 同 channel：打断上一句（整个进程组，含排队中的）
@@ -129,7 +136,7 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
     case "$D" in ''|*[!0-9]*) return 1 ;; esac
     [ "$D" -ge "$SEQ" ]
   }
-  give_up() { q_leave; rm -f "$MP3"; exit 0; }
+  give_up() { q_leave; rm -f "$MP3" "$MP3.err"; exit 0; }
 
   # edge-tts 端点垫片（2026-10-12）：微软把朗读服务搬到 api.msedgeservices.com，旧端点握手 403，
   # PyPI 上的 edge-tts 还指着旧端点。垫片文件在 → 用装着 edge_tts 的那个 python 跑垫片
@@ -146,23 +153,61 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
     done
   fi
 
-  # 合成带超时：队头卡在合成上会拖住整个队列，挂死就掐掉降级 say
+  # 合成带超时：队头卡在合成上会拖住整个队列，挂死就掐掉降级 say。
+  # 失败原因留在 SYNTH_ERR（stderr 最后一行有料的 / 超时 / 空输出），开播时记进 engine.log。
+  SYNTH_ERR=""
   synth() { # $1=文本 $2=输出 mp3
+    SYNTH_ERR=""
+    ERRF="$2.err"
     if [ -n "$EDGE_PY" ]; then
-      "$EDGE_PY" "$EDGE_SHIM" --voice "$VOICE" --rate "$RATE" --text "$1" --write-media "$2" >/dev/null 2>&1 &
+      "$EDGE_PY" "$EDGE_SHIM" --voice "$VOICE" --rate "$RATE" --text "$1" --write-media "$2" >/dev/null 2>"$ERRF" &
     else
-      command -v edge-tts >/dev/null 2>&1 || return 1
-      edge-tts --voice "$VOICE" --rate "$RATE" --text "$1" --write-media "$2" >/dev/null 2>&1 &
+      command -v edge-tts >/dev/null 2>&1 || { SYNTH_ERR="edge-tts not installed"; return 1; }
+      edge-tts --voice "$VOICE" --rate "$RATE" --text "$1" --write-media "$2" >/dev/null 2>"$ERRF" &
     fi
     ep=$!
     s=0
+    timed_out=0
     while kill -0 "$ep" 2>/dev/null; do
       s=$((s+1))
-      [ "$s" -gt $((SYNTH_TO * 20)) ] && { kill "$ep" 2>/dev/null; break; }
+      [ "$s" -gt $((SYNTH_TO * 20)) ] && { kill "$ep" 2>/dev/null; timed_out=1; break; }
       sleep 0.05
     done
-    wait "$ep" 2>/dev/null || return 1
-    [ -s "$2" ]
+    wait "$ep" 2>/dev/null
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      if [ "$timed_out" = 1 ]; then
+        SYNTH_ERR="timeout after ${SYNTH_TO}s"
+      else
+        # 7.3.0 起 edge-tts 往 stderr 画进度条，跳过带百分号的行，只留最后一行真报错
+        SYNTH_ERR="$(grep -vE '^[[:space:]]*$|[0-9]+%' "$ERRF" 2>/dev/null | tail -1 | cut -c1-160)"
+        [ -n "$SYNTH_ERR" ] || SYNTH_ERR="exit $rc"
+      fi
+      rm -f "$ERRF"
+      return 1
+    fi
+    rm -f "$ERRF"
+    [ -s "$2" ] || { SYNTH_ERR="empty output"; return 1; }
+  }
+
+  # say 降级用哪个嗓音：auto = 文本带汉字（UTF-8 首字节 E4–E9）且本机装了 Tingting 就点名它，
+  # 否则交给系统默认。系统默认嗓音多半是英文的，拿到中文会念成一串「FFFFFF」乱音（2026-10-14）。
+  say_voice() { # $1=要念的文本 → 打印嗓音名，或空 = 系统默认
+    case "$SAY_VOICE" in
+      auto)
+        if printf '%s' "$1" | LC_ALL=C grep -q "$(printf '[\xe4-\xe9]')" \
+           && say -v '?' 2>/dev/null | grep -q '^Tingting '; then printf 'Tingting'; fi ;;
+      *) printf '%s' "$SAY_VOICE" ;;
+    esac
+  }
+
+  # 每次开播记一行 engine.log；超 2000 行砍到最近 1000 行
+  elog() { # $1=engine $2=降级原因（空 = 没降级）
+    printf '%s ch=%s engine=%s%s text=%s\n' "$(date '+%F %T')" "$SAFE_CH" "$1" "${2:+ reason=[$2]}" \
+      "$(printf '%s' "$TEXT" | LC_ALL=en_US.UTF-8 cut -c1-80)" >> "$ELOG" 2>/dev/null
+    if [ "$(wc -l < "$ELOG" 2>/dev/null | tr -d ' ')" -gt 2000 ] 2>/dev/null; then
+      tail -1000 "$ELOG" > "$ELOG.tmp" 2>/dev/null && mv "$ELOG.tmp" "$ELOG"
+    fi
   }
 
   # 报家门文本（「xx 这边：」）——句式可用 CC_TTS_LANE_TEMPLATE 覆盖
@@ -172,7 +217,8 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
 
   # 先合成（排在队里的时间跟合成重叠，等到轮到自己时已经烤好了）
   ENGINE=say
-  if synth "$TEXT" "$MP3"; then ENGINE=edge-tts; fi
+  REASON=""
+  if synth "$TEXT" "$MP3"; then ENGINE=edge-tts; else REASON="$SYNTH_ERR"; fi
 
   # 车道报家门 mp3 按 内容×嗓音×语速 落盘缓存（key 含文本哈希，换句式/嗓音/语速自动重烤）
   # ⚠️ 语速必须进 key：不进的话调快语速后，缓存里那句「xx 这边：」还是旧速度，
@@ -245,18 +291,20 @@ set -m  # 后台子 shell 拿独立进程组，便于整组打断
     [ "$MULTI" = "1" ] || printf '%s' "$CHANNEL" > "$GATE"
     printf '%s' "$CHANNEL" > "$CACHE_DIR/last-played"
     echo "$ENGINE" > "$CACHE_DIR/last-engine"
+    elog "$ENGINE" "$REASON"
     if [ "$ENGINE" = "edge-tts" ]; then
       if [ "$SPEAK_PREFIX" -eq 1 ] && [ -s "$PRE_MP3" ]; then afplay "$PRE_MP3"; fi
       afplay "$MP3"
     else
       MSG="$TEXT"
       [ "$SPEAK_PREFIX" -eq 1 ] && MSG="${PRE_TEXT}${TEXT}"
-      say -r "$SAY_RATE" "$MSG"
+      SV="$(say_voice "$MSG")"
+      if [ -n "$SV" ]; then say -v "$SV" -r "$SAY_RATE" "$MSG"; else say -r "$SAY_RATE" "$MSG"; fi
     fi
     # mcv 没有回车当节拍器，两条之间留半口气，别糊成一句
     [ "$MULTI" = "1" ] && sleep 0.35
   fi
-  rm -f "$MP3"
+  rm -f "$MP3" "$MP3.err"
   q_leave
 ) </dev/null >/dev/null 2>&1 &
 echo $! > "$PIDFILE"

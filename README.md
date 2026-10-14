@@ -15,7 +15,9 @@ Claude Code ships voice *input* (`/voice`) but has no voice *output* — the fea
 - **Questions read aloud** — when Claude asks a multiple-choice question, the question and options are spoken too.
 - **`mute`** — toggle silence (also cuts off anything currently playing). **Fn key** — optional global listener: press to cut off the current sentence without muting; keep it held (push-to-talk) and new broadcasts wait until you release.
 - **edge-tts** neural voice (free, no API key) with automatic fallback to macOS `say`.
-  - **Endpoint shim (2026-10-12)** — Microsoft moved Read Aloud to `api.msedgeservices.com` and the old endpoint now refuses with 403, while edge-tts on PyPI (7.2.8) still points at the old one ([rany2/edge-tts#490](https://github.com/rany2/edge-tts/issues/490)). `hooks/edge-tts-shim.py` runs the stock edge-tts CLI against the new endpoint (old one as a 403 fallback). Once a plain `edge-tts --text hi --write-media x.mp3` works again after `pip install -U edge-tts`, delete `~/.claude/hooks/edge-tts-shim.py` and speak.sh goes back to the plain command.
+  - Needs **edge-tts ≥ 7.3.0** (`pip install -U edge-tts`). Microsoft moved the Read Aloud endpoint on 2026-10-10; older releases get 403 on every request and every broadcast silently falls back to `say` ([rany2/edge-tts#490](https://github.com/rany2/edge-tts/issues/490)). `install.sh` warns when it sees an older version.
+  - The `say` fallback names a Chinese voice (Tingting) whenever the text contains Chinese — the system default voice is usually English and reads Chinese as a string of gibberish syllables ("fff-fff-fff"). `CC_TTS_SAY_VOICE` overrides the pick.
+  - Every broadcast appends one line to `$TMPDIR/cc-voice/engine.log` (time, session, engine used, and the exact error when it fell back to `say`), so "the voice suddenly sounds wrong" is a one-line diagnosis.
 
 ## True voice-conversation development
 
@@ -92,7 +94,8 @@ Design notes for the curious:
 | `CC_VOICE_MULTI` | unset | `1` = multi-agent lane mode: fixed "<lane> is done" phrase, ack gate off (this is all `mcv` adds) |
 | `CC_TTS_ACK_TIMEOUT` | `45` | Seconds a queued broadcast waits for your Enter before playing anyway |
 | `CC_TTS_SYNTH_TIMEOUT` | `12` | Seconds before a hung edge-tts is killed and `say` takes over (keeps the queue head from stalling the line) |
-| `CC_TTS_EDGE_SHIM` | `~/.claude/hooks/edge-tts-shim.py` | Endpoint shim; synthesis goes through it while the file exists (see the edge-tts note above). Point it at a missing path to use the plain `edge-tts` command |
+| `CC_TTS_SAY_VOICE` | `auto` | Voice for the `say` fallback: `auto` = Tingting when the text contains Chinese, system default otherwise; any name from `say -v '?'` forces it; empty = always the system default |
+| `CC_TTS_EDGE_SHIM` | `~/.claude/hooks/edge-tts-shim.py` | Escape hatch for the next endpoint move: if a Python file exists at this path, synthesis runs through it instead of the plain `edge-tts` command. Nothing is installed there any more (edge-tts 7.3.0 fixed the 2026-10 move) |
 | `CC_TTS_ASK_PHRASE` | `要选一下：` | Spoken lead-in for multiple-choice questions |
 | `CC_TTS_LANE_TEMPLATE` | `%s 这边：` | printf template for the session announcement (e.g. `"%s here: "`) |
 | `CC_TTS_DONE_TEMPLATE` | `%s 搞定了` | mcv: what a finished lane says (e.g. `"%s is done"`) |

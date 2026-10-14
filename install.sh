@@ -30,7 +30,18 @@ command -v claude >/dev/null 2>&1 || echo "⚠️  'claude' CLI not found on PAT
 if ! command -v edge-tts >/dev/null 2>&1; then
   echo "⚠️  edge-tts not found — will fall back to the macOS 'say' voice (works, sounds robotic)."
   echo "    Recommended:  pipx install edge-tts   (or: pip3 install --user edge-tts)"
+else
+  # Microsoft moved the Read Aloud endpoint on 2026-10-10; releases before 7.3.0 get 403 on every
+  # request, and then every broadcast silently falls back to 'say' (rany2/edge-tts#490).
+  EV="$(edge-tts --version 2>/dev/null | awk '{print $2}')"
+  case "$EV" in
+    7.3.*|7.[4-9].*|[89].*|[1-9][0-9].*) ;;
+    *) echo "⚠️  edge-tts ${EV:-<7.2.6} is older than 7.3.0 — it can no longer reach Microsoft's endpoint, so every"
+       echo "    broadcast would fall back to 'say'. Fix:  pip install -U edge-tts" ;;
+  esac
 fi
+# Old installs carried an endpoint shim; edge-tts >= 7.3.0 made it unnecessary.
+[ -f "$HOOKS_DIR/edge-tts-shim.py" ] && rm -f "$HOOKS_DIR/edge-tts-shim.py" && echo "✓ removed the retired edge-tts-shim.py"
 
 # ── 1. Hook scripts ──────────────────────────────────────────────────────────
 mkdir -p "$HOOKS_DIR"
@@ -38,7 +49,7 @@ install_file() { # $1=src  $2=dst  (backs up a differing existing dst once)
   if [ -f "$2" ] && ! cmp -s "$1" "$2"; then cp "$2" "$2.bak"; fi
   cp "$1" "$2"
 }
-for f in speak.sh tts-stop.sh tts-ask.sh tts-ack.sh mute.sh hush.sh edge-tts-shim.py; do
+for f in speak.sh tts-stop.sh tts-ask.sh tts-ack.sh mute.sh hush.sh; do
   install_file "$REPO_DIR/hooks/$f" "$HOOKS_DIR/$f"
   chmod +x "$HOOKS_DIR/$f"
 done
